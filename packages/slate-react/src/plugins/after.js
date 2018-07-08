@@ -34,7 +34,6 @@ const debug = Debug('slate:after')
 
 function AfterPlugin() {
   let isDraggingInternally = null
-  let stagedChange = null
 
   /**
    * On before input, correct any browser inconsistencies.
@@ -46,8 +45,6 @@ function AfterPlugin() {
 
   function onBeforeInput(event, change, editor) {
     debug('onBeforeInput', { event })
-    this.changeHandled = true
-    change.insertText(event.data)
   }
 
   /**
@@ -353,8 +350,8 @@ function AfterPlugin() {
 
     // Change the current value to have the leaf's text replaced.
 
+    // naive POC logic. only trust native behavior if it's 1 add or delete
     if (Math.abs(delta) === 1) {
-      // trust the native behavior
       this.pushUpdate = false
     }
     change
