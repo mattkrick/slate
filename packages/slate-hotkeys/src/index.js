@@ -81,8 +81,6 @@ const isTransposeCharacter = e => IS_APPLE && isTransposeCharacterMac(e)
 
 const isContentEditable = e =>
   isBold(e) ||
-  isDeleteCharBackward(e) ||
-  isDeleteCharForward(e) ||
   isDeleteLineBackward(e) ||
   isDeleteLineForward(e) ||
   isDeleteWordBackward(e) ||

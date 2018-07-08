@@ -1,7 +1,7 @@
 import Base64 from 'slate-base64-serializer'
 import Debug from 'debug'
 import Plain from 'slate-plain-serializer'
-import { IS_IOS, IS_ANDROID } from 'slate-dev-environment'
+import { IS_IOS } from 'slate-dev-environment'
 import React from 'react'
 import getWindow from 'get-window'
 import { Block, Inline, Text } from 'slate'
@@ -25,7 +25,6 @@ import setEventTransfer from '../utils/set-event-transfer'
  */
 
 const debug = Debug('slate:after')
-const ANDROID_KEYSTROKE_DEBOUNCE = 300
 
 /**
  * The after plugin.
@@ -47,10 +46,7 @@ function AfterPlugin() {
 
   function onBeforeInput(event, change, editor) {
     debug('onBeforeInput', { event })
-    // onBeforeInput is used as a cheaper insert
-    // Android events are debounced and a full diff is required
-    if (IS_ANDROID) return
-    event.preventDefault()
+    this.changeHandled = true
     change.insertText(event.data)
   }
 
@@ -301,7 +297,10 @@ function AfterPlugin() {
 
   function onInput(event, change, editor) {
     debug('onInput', { event })
-
+    if (this.changeHandled) {
+      this.changeHandled = false
+      return
+    }
     const window = getWindow(event.target)
     const { value } = change
 
@@ -354,26 +353,13 @@ function AfterPlugin() {
 
     // Change the current value to have the leaf's text replaced.
 
-    if (IS_ANDROID) {
-      // Controlled contentEditables lose their selection range every render
-      // and must be updated manually (see Content#componentDidUpdate)
-      // Updating the selection causes the IME auto-suggest to recompute
-      // synchronously, causing lost input events during that recompute
-      // If device turns off IME auto-suggest, this is not needed
-      clearTimeout(stagedChange)
-
-      stagedChange = setTimeout(() => {
-        change
-          .insertTextAtRange(entire, textContent, leaf.marks)
-          .select(corrected)
-
-        editor.onChange(change)
-      }, ANDROID_KEYSTROKE_DEBOUNCE)
-    } else {
-      change
-        .insertTextAtRange(entire, textContent, leaf.marks)
-        .select(corrected)
+    if (Math.abs(delta) === 1) {
+      // trust the native behavior
+      this.pushUpdate = false
     }
+    change
+      .insertTextAtRange(entire, textContent, leaf.marks)
+      .select(corrected)
   }
 
   /**
@@ -399,10 +385,14 @@ function AfterPlugin() {
     }
 
     if (Hotkeys.isDeleteCharBackward(event) && !IS_IOS) {
+      this.changeHandled = true
+      this.pushUpdate = false
       return change.deleteCharBackward()
     }
 
     if (Hotkeys.isDeleteCharForward(event) && !IS_IOS) {
+      this.changeHandled = true
+      this.pushUpdate = false
       return change.deleteCharForward()
     }
 
@@ -624,6 +614,8 @@ function AfterPlugin() {
       return obj
     }, {})
 
+    const pushUpdate = this.pushUpdate
+    this.pushUpdate = true
     return (
       <Content
         {...handlers}
@@ -631,6 +623,7 @@ function AfterPlugin() {
         className={props.className}
         children={props.children}
         editor={editor}
+        pushUpdate={pushUpdate}
         readOnly={props.readOnly}
         role={props.role}
         spellCheck={props.spellCheck}

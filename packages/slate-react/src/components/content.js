@@ -129,6 +129,10 @@ class Content extends React.Component {
    * On update, update the selection.
    */
 
+  shouldComponentUpdate(nextProps) {
+    return Boolean(nextProps.pushUpdate)
+  }
+
   getSnapshotBeforeUpdate() {
     // Android changes are debounced and the range needs to be cached
     if (!IS_ANDROID) return null
