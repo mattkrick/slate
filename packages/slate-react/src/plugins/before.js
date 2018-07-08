@@ -1,7 +1,7 @@
 import Debug from 'debug'
 import getWindow from 'get-window'
 import { findDOMNode } from 'react-dom'
-import Hotkeys from 'slate-hotkeys'
+import Hotkeys from '@mattkrick/slate-hotkeys'
 import {
   IS_FIREFOX,
   IS_IOS,

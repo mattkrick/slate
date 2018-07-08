@@ -5,7 +5,7 @@ import { IS_IOS } from 'slate-dev-environment'
 import React from 'react'
 import getWindow from 'get-window'
 import { Block, Inline, Text } from 'slate'
-import Hotkeys from 'slate-hotkeys'
+import Hotkeys from '@mattkrick/slate-hotkeys'
 
 import EVENT_HANDLERS from '../constants/event-handlers'
 import Content from '../components/content'
