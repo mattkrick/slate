@@ -1,10 +1,9 @@
 import Base64 from 'slate-base64-serializer'
-import Debug from 'debug'
 import Plain from 'slate-plain-serializer'
 import { IS_IOS } from 'slate-dev-environment'
 import React from 'react'
 import getWindow from 'get-window'
-import { Block, Inline, Text } from 'slate'
+import { Block, Change, Inline, Text } from 'slate'
 import Hotkeys from 'slate-hotkeys'
 
 import EVENT_HANDLERS from '../constants/event-handlers'
@@ -12,11 +11,18 @@ import Content from '../components/content'
 import cloneFragment from '../utils/clone-fragment'
 import findDOMNode from '../utils/find-dom-node'
 import findNode from '../utils/find-node'
-import findPoint from '../utils/find-point'
 import findRange from '../utils/find-range'
 import getEventRange from '../utils/get-event-range'
 import getEventTransfer from '../utils/get-event-transfer'
 import setEventTransfer from '../utils/set-event-transfer'
+import Debug from 'debug'
+import {
+  handleBeforeInputLevel2,
+  handleDeleteChar,
+  handleInputBelowLevel2,
+  handleKeyDownLevel1,
+  handleSplit,
+} from '../utils/after-handlers'
 
 /**
  * Debug.
@@ -25,6 +31,11 @@ import setEventTransfer from '../utils/set-event-transfer'
  */
 
 const debug = Debug('slate:after')
+// level 1 fires the native onBeforeInput and includes a useful inputType
+const INPUT_EVENTS_LEVEL_1 = new InputEvent('input').inputType === ''
+// level 2 makes input events cancelable and provides meaningful getTargetRanges()
+const INPUT_EVENTS_LEVEL_2 = IS_IOS
+const SPLIT_TYPES = ['insertLineBreak', 'insertParagraph']
 
 /**
  * The after plugin.
@@ -32,8 +43,13 @@ const debug = Debug('slate:after')
  * @return {Object}
  */
 
+
 function AfterPlugin() {
   let isDraggingInternally = null
+  let preventDefault = false
+  let plugin = null
+  let syntheticInput = null
+  let cachedCompositionData = null
 
   /**
    * On before input, correct any browser inconsistencies.
@@ -43,8 +59,91 @@ function AfterPlugin() {
    * @param {Editor} editor
    */
 
+  function handleBeforeInputLevel1(event, change) {
+    const isSyntheticEvent = Boolean(event.nativeEvent)
+    console.log('before input', event, event.cancelable)
+    if (isSyntheticEvent) {
+      console.log('synthetic event!')
+      if (preventDefault) {
+        console.log('prev default', event, event.cancelable)
+        event.preventDefault()
+        preventDefault = false
+      }
+      return
+    }
+    const { inputType, data, dataTransfer } = event
+    if (SPLIT_TYPES.includes(inputType)) {
+      console.log('run split')
+      preventDefault = true
+      handleSplit(change)
+    // } else if (inputType === 'deleteHardLineBackward') {
+    //   preventDefault = true
+    //   change.deleteLineBackward()
+    }
+  }
+
+  function handleBeforeInputNonCompliant(event, change) {
+    console.log('NONCOMPLIANT event', event, event.data, event.nativeEvent)
+    const { data, nativeEvent } = event
+    if (syntheticInput) return
+    if (nativeEvent.type === 'keypress') {
+      if (Hotkeys.isSplitBlock(nativeEvent)) {
+        handleSplit(change)
+        event.preventDefault()
+      } else {
+        syntheticInput = {
+          inputType: 'insertText',
+          data,
+        }
+      }
+    }
+  }
+
+  function handleInputLevel1(event, change) {
+    const { data, inputType } = event.nativeEvent
+    console.log('input', event.nativeEvent.getTargetRanges())
+    handleInputBelowLevel2(data, inputType, change)
+  }
+
+  function handleInputNonCompliant(event, change) {
+    const { data, inputType } = syntheticInput
+    handleInputBelowLevel2(data, inputType, change)
+    syntheticInput = null
+  }
+
+  function handleKeyDownNonCompliant(event, change) {
+    if (Hotkeys.isDeleteCharBackward(event)) {
+      const isRemoveText = handleDeleteChar(event, change, 'deleteCharBackward')
+
+      if (isRemoveText) {
+        syntheticInput = {
+          inputType: 'deleteContentBackward',
+        }
+      }
+      return true
+    }
+
+    if (Hotkeys.isDeleteCharForward(event)) {
+      const isRemoveText = handleDeleteChar(event, change, 'deleteCharForward')
+
+      if (isRemoveText) {
+        syntheticInput = {
+          inputType: 'deleteContentForward',
+        }
+      }
+      return true
+    }
+    return false
+  }
+
   function onBeforeInput(event, change, editor) {
-    debug('onBeforeInput', { event })
+    if (INPUT_EVENTS_LEVEL_2) {
+      handleBeforeInputLevel2(event, editor)
+    } else if (INPUT_EVENTS_LEVEL_1) {
+      handleBeforeInputLevel1(event, change)
+    } else {
+      handleBeforeInputNonCompliant(event, change)
+    }
   }
 
   /**
@@ -86,6 +185,15 @@ function AfterPlugin() {
     }
 
     debug('onClick', { event })
+  }
+
+  function onCompositionEnd() {
+    cachedCompositionData = null
+  }
+
+  function onCompositionUpdate(event, change, editor) {
+    console.log('onCompUpdate', event, event.nativeEvent, event.data)
+    cachedCompositionData = event.data
   }
 
   /**
@@ -222,7 +330,7 @@ function AfterPlugin() {
       target = target.move(
         selection.startKey == selection.endKey
           ? 0 - selection.endOffset + selection.startOffset
-          : 0 - selection.endOffset
+          : 0 - selection.endOffset,
       )
     }
 
@@ -281,7 +389,7 @@ function AfterPlugin() {
         view: window,
         bubbles: true,
         cancelable: true,
-      })
+      }),
     )
   }
 
@@ -292,71 +400,29 @@ function AfterPlugin() {
    * @param {Change} change
    */
 
+  /*
+   * onKeyDown is a bad injection point because mobile devices don't fire that event
+   * onCompositionEnd is bad because physical keyboards don't fire that event
+   * onBeforeInput is a bad injection point because
+   * a) firefox (still!) doesn't fire the event
+   * b) chrome only implements input events level 1, which means most events
+   *    cannot be canceled (eg insertLineBreak)
+   * c) react calls it beforeInput, but it's actually textInput,
+   *    which fires too late (after keyPress)
+   * onInput isn't ideal because we still can't cancel events
+   * but we can undo the native behavior
+   * and we can polyfill the inputType based on onKeyDown and onCompositionEnd
+   * if we need firefox support
+   */
+
   function onInput(event, change, editor) {
-    debug('onInput', { event })
-    if (this.changeHandled) {
-      this.changeHandled = false
-      return
+    // handle insertText in onInput to all DOM native handling to occur
+    // if triggered from onBeforeInput, vDOM merges the 2 and duplicates output
+    if (INPUT_EVENTS_LEVEL_1) {
+      handleInputLevel1(event, change)
+    } else {
+      handleInputNonCompliant(event, change)
     }
-    const window = getWindow(event.target)
-    const { value } = change
-
-    // Get the selection point.
-    const native = window.getSelection()
-    const { anchorNode } = native
-    const point = findPoint(anchorNode, 0, value)
-    if (!point) return
-
-    // Get the text node and leaf in question.
-    const { document, selection } = value
-    const node = document.getDescendant(point.key)
-    const block = document.getClosestBlock(node.key)
-    const leaves = node.getLeaves()
-    const lastText = block.getLastText()
-    const lastLeaf = leaves.last()
-    let start = 0
-    let end = 0
-
-    const leaf =
-      leaves.find(r => {
-        start = end
-        end += r.text.length
-        if (end > point.offset) return true
-      }) || lastLeaf
-
-    // Get the text information.
-    const { text } = leaf
-    let { textContent } = anchorNode
-    const isLastText = node == lastText
-    const isLastLeaf = leaf == lastLeaf
-    const lastChar = textContent.charAt(textContent.length - 1)
-
-    // COMPAT: If this is the last leaf, and the DOM text ends in a new line,
-    // we will have added another new line in <Leaf>'s render method to account
-    // for browsers collapsing a single trailing new lines, so remove it.
-    if (isLastText && isLastLeaf && lastChar == '\n') {
-      textContent = textContent.slice(0, -1)
-    }
-
-    // If the text is no different, abort.
-    if (textContent == text) return
-
-    // Determine what the selection should be after changing the text.
-    const delta = textContent.length - text.length
-    const corrected = selection.collapseToEnd().move(delta)
-    const entire = selection
-      .moveAnchorTo(point.key, start)
-      .moveFocusTo(point.key, end)
-
-    // Change the current value to have the leaf's text replaced.
-
-    // naive POC logic. only trust native behavior if it's 1 add or delete
-    if (Math.abs(delta) === 1) {
-      this.pushUpdate = false
-    }
-    change
-      .insertTextAtRange(entire, textContent, leaf.marks)
-      .select(corrected)
   }
 
   /**
@@ -369,35 +435,27 @@ function AfterPlugin() {
 
   function onKeyDown(event, change, editor) {
     debug('onKeyDown', { event })
-
-    const { value } = change
-
-    // COMPAT: In iOS, some of these hotkeys are handled in the
-    // `onNativeBeforeInput` handler of the `<Content>` component in order to
-    // preserve native autocorrect behavior, so they shouldn't be handled here.
-    if (Hotkeys.isSplitBlock(event) && !IS_IOS) {
-      return value.isInVoid
-        ? change.collapseToStartOfNextText()
-        : change.splitBlock()
+    let handled = false
+    if (INPUT_EVENTS_LEVEL_2) {
+      // noop level 2 of the spec operates entirely in beforeinput
+    } else if (INPUT_EVENTS_LEVEL_1) {
+      handled = handleKeyDownLevel1(event, change)
+    } else {
+      handled = handleKeyDownNonCompliant(event, change)
     }
-
-    if (Hotkeys.isDeleteCharBackward(event) && !IS_IOS) {
-      this.changeHandled = true
-      this.pushUpdate = false
-      return change.deleteCharBackward()
-    }
-
-    if (Hotkeys.isDeleteCharForward(event) && !IS_IOS) {
-      this.changeHandled = true
-      this.pushUpdate = false
-      return change.deleteCharForward()
-    }
+    if (handled) return
 
     if (Hotkeys.isDeleteLineBackward(event)) {
+      // BROKEN! see #1965
+      // TODO once fixed, move to the inputHandler for universal device support
+      event.preventDefault()
       return change.deleteLineBackward()
     }
 
     if (Hotkeys.isDeleteLineForward(event)) {
+      // BROKEN! see #1966
+      // TODO once fixed, move to the inputHandler for universal device support
+      event.preventDefault()
       return change.deleteLineForward()
     }
 
@@ -443,6 +501,7 @@ function AfterPlugin() {
     // COMPAT: If a void node is selected, or a zero-width text node adjacent to
     // an inline is selected, we need to handle these hotkeys manually because
     // browsers won't know what to do.
+    const {value} = change
     if (Hotkeys.isCollapseCharBackward(event)) {
       const { document, isInVoid, previousText, startText } = value
       const isPreviousInVoid =
@@ -611,8 +670,8 @@ function AfterPlugin() {
       return obj
     }, {})
 
-    const pushUpdate = this.pushUpdate
-    this.pushUpdate = true
+    const pushUpdateProp = editor.pushUpdate
+    editor.pushUpdate = false
     return (
       <Content
         {...handlers}
@@ -620,7 +679,7 @@ function AfterPlugin() {
         className={props.className}
         children={props.children}
         editor={editor}
-        pushUpdate={pushUpdate}
+        pushUpdate={pushUpdateProp}
         readOnly={props.readOnly}
         role={props.role}
         spellCheck={props.spellCheck}
@@ -688,10 +747,11 @@ function AfterPlugin() {
    * @type {Object}
    */
 
-  return {
+  plugin = {
     onBeforeInput,
     onBlur,
     onClick,
+    onCompositionUpdate,
     onCopy,
     onCut,
     onDragEnd,
@@ -706,6 +766,7 @@ function AfterPlugin() {
     renderNode,
     renderPlaceholder,
   }
+  return plugin
 }
 
 /**

@@ -41,18 +41,6 @@ function BeforePlugin() {
    */
 
   function onBeforeInput(event, change, editor) {
-    if (editor.props.readOnly) return true
-
-    // COMPAT: React's `onBeforeInput` synthetic event is based on the native
-    // `keypress` and `textInput` events. In browsers that support the native
-    // `beforeinput` event, we instead use that event to trigger text insertion,
-    // since it provides more useful information about the range being affected
-    // and also preserves compatibility with iOS autocorrect, which would be
-    // broken if we called `preventDefault()` on React's synthetic event here.
-    // Since native `onbeforeinput` mainly benefits autocorrect and spellcheck
-    // for mobile, on desktop it brings IME issue, limit its scope for now.
-    if ((IS_IOS || IS_ANDROID) && SUPPORTED_EVENTS.beforeinput) return true
-
     debug('onBeforeInput', { event })
   }
 
@@ -375,14 +363,6 @@ function BeforePlugin() {
   function onKeyDown(event, change, editor) {
     if (editor.props.readOnly) return true
 
-    // ignore garbage 229 events sent during composition
-    // event.isComposing doesn't exist in react pseudo events
-    // https://github.com/facebook/react/issues/13104
-    if (event.key === 'Unidentified') {
-      event.preventDefault()
-      return true
-    }
-
     // When composing, we need to prevent all hotkeys from executing while
     // typing. However, certain characters also move the selection before
     // we're able to handle it, so prevent their default behavior.
@@ -393,9 +373,9 @@ function BeforePlugin() {
 
     // Certain hotkeys have native behavior in contenteditable elements which
     // will cause our value to be out of sync, so prevent them.
-    if (Hotkeys.isContentEditable(event) && !IS_IOS) {
-      event.preventDefault()
-    }
+    // if (Hotkeys.isContentEditable(event) && !IS_IOS) {
+    //   event.preventDefault()
+    // }
 
     debug('onKeyDown', { event })
   }

@@ -10,6 +10,7 @@ const EVENT_HANDLERS = [
   'onClick',
   'onCompositionEnd',
   'onCompositionStart',
+  'onCompositionUpdate',
   'onCopy',
   'onCut',
   'onDragEnd',

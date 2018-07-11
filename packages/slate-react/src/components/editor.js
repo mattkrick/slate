@@ -20,6 +20,19 @@ import noop from '../utils/noop'
 
 const debug = Debug('slate:editor')
 
+const getPushUpdate = (change) => {
+  return true
+  const {operations} = change
+  const opType = (idx) => operations.get(idx).type
+  if (operations.size === 1 && opType(0) === 'insert_text') {
+    return false
+  }
+  if (operations.size === 2 && opType(0) === 'set_selection' && opType(1) === 'remove_text') {
+    return false
+  }
+  // TODO handle more cases like delete line backward/forward for better performance
+  return true
+}
 /**
  * Editor.
  *
@@ -74,6 +87,7 @@ class Editor extends React.Component {
   constructor(props) {
     super(props)
     this.state = {}
+    this.pushUpdate = undefined
     this.tmp = {}
     this.tmp.updates = 0
     this.tmp.resolves = 0
@@ -223,6 +237,12 @@ class Editor extends React.Component {
     this.change(c => c.focus())
   }
 
+  ignoreChange = () => {
+    // if a plugin doesn't call pushUpdate, then pushUpdate == true
+    if (this.pushUpdate === undefined) {
+
+    }
+  }
   /**
    * Getters for exposing public properties of the editor's state.
    */
@@ -265,6 +285,8 @@ class Editor extends React.Component {
     const { value } = change
     const { onChange } = this.props
     if (value == this.value) return
+
+    this.pushUpdate = getPushUpdate(change)
     onChange(change)
   }
 

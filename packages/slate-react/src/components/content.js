@@ -2,12 +2,7 @@ import Debug from 'debug'
 import React from 'react'
 import Types from 'prop-types'
 import getWindow from 'get-window'
-import {
-  IS_FIREFOX,
-  IS_IOS,
-  IS_ANDROID,
-  SUPPORTED_EVENTS,
-} from 'slate-dev-environment'
+import { IS_ANDROID, IS_FIREFOX, IS_IOS, SUPPORTED_EVENTS } from 'slate-dev-environment'
 import logger from 'slate-dev-logger'
 import throttle from 'lodash/throttle'
 
@@ -94,13 +89,9 @@ class Content extends React.Component {
 
     window.document.addEventListener(
       'selectionchange',
-      this.onNativeSelectionChange
+      this.onNativeSelectionChange,
     )
-
-    // COMPAT: Restrict scope of `beforeinput` to mobile.
-    if ((IS_IOS || IS_ANDROID) && SUPPORTED_EVENTS.beforeinput) {
-      this.element.addEventListener('beforeinput', this.onNativeBeforeInput)
-    }
+    this.element.addEventListener('beforeinput', this.onBeforeInput)
 
     this.updateSelection()
   }
@@ -115,14 +106,11 @@ class Content extends React.Component {
     if (window) {
       window.document.removeEventListener(
         'selectionchange',
-        this.onNativeSelectionChange
+        this.onNativeSelectionChange,
       )
     }
 
-    // COMPAT: Restrict scope of `beforeinput` to mobile.
-    if ((IS_IOS || IS_ANDROID) && SUPPORTED_EVENTS.beforeinput) {
-      this.element.removeEventListener('beforeinput', this.onNativeBeforeInput)
-    }
+    this.element.removeEventListener('beforeinput', this.onBeforeInput)
   }
 
   /**
@@ -130,6 +118,7 @@ class Content extends React.Component {
    */
 
   shouldComponentUpdate(nextProps) {
+    console.log('update', Boolean(nextProps.pushUpdate))
     return Boolean(nextProps.pushUpdate)
   }
 
@@ -203,7 +192,7 @@ class Content extends React.Component {
     if (!range) {
       logger.error(
         'Unable to find a native DOM range from the current selection.',
-        { selection }
+        { selection },
       )
       return
     }
@@ -242,14 +231,14 @@ class Content extends React.Component {
           range.endContainer,
           range.endOffset,
           range.startContainer,
-          range.startOffset
+          range.startOffset,
         )
       } else {
         native.setBaseAndExtent(
           range.startContainer,
           range.startOffset,
           range.endContainer,
-          range.endOffset
+          range.endOffset,
         )
       }
     } else {
@@ -380,77 +369,24 @@ class Content extends React.Component {
    * On a native `beforeinput` event, use the additional range information
    * provided by the event to manipulate text exactly as the browser would.
    *
-   * This is currently only used on iOS and Android.
-   *
    * @param {InputEvent} event
    */
 
-  onNativeBeforeInput = event => {
-    if (this.props.readOnly) return
-    if (!this.isInEditor(event.target)) return
+  // onBeforeInputFallback = event => {
+  //   if (this.nativeBeforeInputEvent) {
+  //     // event.nativeEvent.hiddenEvent = this.nativeBeforeInputEvent
+  //     this.nativeBeforeInputEvent = null
+  //     // console.log('applying synthetic event', event)
+  //     console.log('maybe prevent default')
+  //     this.props.maybePreventDefault(event)
+  //   } else {
+  //     console.log('applying fallback', event)
+  //     this.props.onBeforeInputFallback(event)
+  //   }
+  // }
 
-    const [targetRange] = event.getTargetRanges()
-    if (!targetRange) return
-
-    const { editor } = this.props
-
-    switch (event.inputType) {
-      case 'deleteContentBackward': {
-        event.preventDefault()
-
-        const range = findRange(targetRange, editor.value)
-        editor.change(change => change.deleteAtRange(range))
-        break
-      }
-
-      case 'insertLineBreak': // intentional fallthru
-      case 'insertParagraph': {
-        event.preventDefault()
-        const range = findRange(targetRange, editor.value)
-
-        editor.change(change => {
-          if (change.value.isInVoid) {
-            change.collapseToStartOfNextText()
-          } else {
-            change.splitBlockAtRange(range)
-          }
-        })
-
-        break
-      }
-
-      case 'insertReplacementText': // intentional fallthru
-      case 'insertText': {
-        // `data` should have the text for the `insertText` input type and
-        // `dataTransfer` should have the text for the `insertReplacementText`
-        // input type, but Safari uses `insertText` for spell check replacements
-        // and sets `data` to `null`.
-        const text =
-          event.data == null
-            ? event.dataTransfer.getData('text/plain')
-            : event.data
-
-        if (text == null) return
-
-        event.preventDefault()
-
-        const { value } = editor
-        const { selection } = value
-        const range = findRange(targetRange, value)
-
-        editor.change(change => {
-          change.insertTextAtRange(range, text, selection.marks)
-
-          // If the text was successfully inserted, and the selection had marks
-          // on it, unset the selection's marks.
-          if (selection.marks && value.document != change.value.document) {
-            change.select({ marks: null })
-          }
-        })
-
-        break
-      }
-    }
+  onBeforeInput = event => {
+    this.props.onBeforeInput(event)
   }
 
   /**
@@ -523,7 +459,6 @@ class Content extends React.Component {
     }
 
     debug('render', { props })
-
     return (
       <Container
         {...handlers}
