@@ -1,6 +1,7 @@
 import { Change } from 'slate'
 import Hotkeys from 'slate-hotkeys'
 import findRange from '../utils/find-range'
+import updateComposition from './update-composition';
 
 export function handleBeforeInputLevel2 (event, editor) {
   // TODO: iPhone user, please refactor to event, change & leave editor out of it
@@ -70,14 +71,14 @@ export function handleInputBelowLevel2(data, inputType, change) {
   if (inputType === 'insertText') {
     change.insertText(data)
   } else if (inputType === 'insertCompositionText') {
-    
+    updateComposition(change)
   } else if (inputType === 'deleteContentBackward') {
     change.deleteCharBackward()
   } else if (inputType === 'deleteContentForward') {
     change.deleteCharForward()
   }
 }
-
+``
 export function handleSplit(change) {
   return change.value.isInVoid
     ? change.collapseToStartOfNextText()
