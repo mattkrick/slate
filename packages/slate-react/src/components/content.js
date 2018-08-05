@@ -122,24 +122,24 @@ class Content extends React.Component {
     return Boolean(nextProps.pushUpdate)
   }
 
-  getSnapshotBeforeUpdate() {
-    // Android changes are debounced and the range needs to be cached
-    if (!IS_ANDROID) return null
-    const selection = window.getSelection()
-    if (selection.rangeCount !== 1) return null
-    const range = selection.getRangeAt(0)
-    return {
-      startOffset: range.startOffset,
-      endOffset: range.endOffset,
-      startContainer: range.startContainer,
-      endContainer: range.endContainer,
-    }
-  }
+  // getSnapshotBeforeUpdate() {
+  //   // Android changes are debounced and the range needs to be cached
+  //   if (!IS_ANDROID) return null
+  //   const selection = window.getSelection()
+  //   if (selection.rangeCount !== 1) return null
+  //   const range = selection.getRangeAt(0)
+  //   console.log('snapshot range', range)
+  //   return {
+  //     startOffset: range.startOffset,
+  //     endOffset: range.endOffset,
+  //     startContainer: range.startContainer,
+  //     endContainer: range.endContainer,
+  //   }
+  // }
 
   componentDidUpdate = (prevProps, prevState, snapshot) => {
     if (snapshot) {
       const selection = window.getSelection()
-
       if (selection.rangeCount === 1) {
         const range = selection.getRangeAt(0)
         const {
@@ -257,7 +257,7 @@ class Content extends React.Component {
       this.tmp.isUpdatingSelection = false
     })
 
-    debug('updateSelection', { selection, native })
+    console.log('updateSelection', { selection: selection.toJS(), native })
   }
 
   /**

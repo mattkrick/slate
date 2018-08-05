@@ -20,19 +20,32 @@ import noop from '../utils/noop'
 
 const debug = Debug('slate:editor')
 
+/*
+ * list of all operation chains that mimic native browser behavior
+ * if the browser handles the operations exactly like slate,
+ * we are guaranteed that we don't need to re-render
+ */
+
+const NATIVE_OP_CHAINS = [
+  // physical keyboard adding a character anywhere in the leaf
+  ['insert_text'],
+  // physical keyboard removing a character anywhere in the leaf
+  ['set_selection', 'remove_text'],
+  // IME removing text from the end
+  ['set_selection', 'remove_text', 'insert_text'],
+  // IME adding or removing anywhere in the leaf
+  ['set_selection', 'remove_text', 'insert_text', 'set_selection'],
+]
+
 const getPushUpdate = (change) => {
   return true
-  const {operations} = change
-  const opType = (idx) => operations.get(idx).type
-  if (operations.size === 1 && opType(0) === 'insert_text') {
-    return false
-  }
-  if (operations.size === 2 && opType(0) === 'set_selection' && opType(1) === 'remove_text') {
-    return false
-  }
-  // TODO handle more cases like delete line backward/forward for better performance
-  return true
+  const opChain = change.operations.map(({type}) => type).toJS()
+  return !NATIVE_OP_CHAINS.some((nativeOpChain) => {
+    return nativeOpChain.length === opChain.length &&
+      opChain.every((op, idx) => op === nativeOpChain[idx])
+  })
 }
+
 /**
  * Editor.
  *

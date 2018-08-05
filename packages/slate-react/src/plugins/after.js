@@ -20,9 +20,10 @@ import {
   handleBeforeInputLevel2,
   handleDeleteChar,
   handleInputBelowLevel2,
-  handleKeyDownLevel1,
   handleSplit,
 } from '../utils/after-handlers'
+import { isDefaultRemoveTextBehavior } from '../utils/after-handlers'
+import { getBlockLength } from '../utils/after-handlers'
 
 /**
  * Debug.
@@ -31,10 +32,10 @@ import {
  */
 
 const debug = Debug('slate:after')
-// level 1 fires the native onBeforeInput and includes a useful inputType
-const INPUT_EVENTS_LEVEL_1 = new InputEvent('input').inputType === ''
 // level 2 makes input events cancelable and provides meaningful getTargetRanges()
 const INPUT_EVENTS_LEVEL_2 = IS_IOS
+// level 1 fires the native onBeforeInput and includes a useful inputType
+const INPUT_EVENTS_LEVEL_1 = !INPUT_EVENTS_LEVEL_2 && new InputEvent('input').inputType === ''
 const SPLIT_TYPES = ['insertLineBreak', 'insertParagraph']
 
 /**
@@ -50,7 +51,8 @@ function AfterPlugin() {
   let plugin = null
   let syntheticInput = null
   let cachedCompositionData = null
-
+  let isUnidentifiedKeyDown = false
+  let ignoreInput = false
   /**
    * On before input, correct any browser inconsistencies.
    *
@@ -58,6 +60,47 @@ function AfterPlugin() {
    * @param {Change} change
    * @param {Editor} editor
    */
+
+  function handleCompositionUpdateLevel1(event, change) {
+    console.log('handle Comp', event.nativeEvent)
+    return
+    if (isUnidentifiedKeyDown) {
+      isUnidentifiedKeyDown = false
+      if (event.data === '') {
+        // when the only composition is deleted, special handling is required
+        // for the fist char to make sure the DOM doesn't remove the div
+        const isRemoveText = isDefaultRemoveTextBehavior(change)
+        if (!isRemoveText) {
+          console.log("NOT DEFAULT")
+          // event.preventDefault()
+          change.deleteBackward()
+        }
+
+        // const { value: { document, selection: { anchorKey } } } = change
+        // const block = document.getClosestBlock(anchorKey)
+        // const numChars = block.text.length
+        // const {anchorOffset, focusOffset} = window.getSelection()
+        // const numCharsToRemove = focusOffset - anchorOffset
+        // if (numChars === numCharsToRemove) {
+          // event.preventDefault()
+          // console.log('entire', change.value.selection)
+          // // IMEs only have a backspace key, so we know the trigger
+          // change
+          //   .insertTextAtRange(entire, textContent, leaf.marks)
+          // change.deleteCharBackward()
+        // }
+      } else {
+        console.log('other comp', event.data)
+        const blockLength = getBlockLength(change)
+        if (blockLength === 0) {
+          console.log('prevent default comp update')
+          // event.preventDefault()
+          ignoreInput = true
+          // change.insertText(event.data)
+        }
+      }
+    }
+  }
 
   function handleBeforeInputLevel1(event, change) {
     const isSyntheticEvent = Boolean(event.nativeEvent)
@@ -76,9 +119,6 @@ function AfterPlugin() {
       console.log('run split')
       preventDefault = true
       handleSplit(change)
-    // } else if (inputType === 'deleteHardLineBackward') {
-    //   preventDefault = true
-    //   change.deleteLineBackward()
     }
   }
 
@@ -101,7 +141,6 @@ function AfterPlugin() {
 
   function handleInputLevel1(event, change) {
     const { data, inputType } = event.nativeEvent
-    console.log('input', event.nativeEvent.getTargetRanges())
     handleInputBelowLevel2(data, inputType, change)
   }
 
@@ -111,9 +150,30 @@ function AfterPlugin() {
     syntheticInput = null
   }
 
+  function handleKeyDownLevel1(event, change) {
+    if (event.key === 'Unidentified') {
+      console.log('unID keydown')
+      isUnidentifiedKeyDown = true
+      return true
+    }
+    // if the deletion removes the leaf by default, we need to prevent it
+    // level 1 beforeinput events cannot be canceled, so it must occur here
+    if (Hotkeys.isDeleteCharBackward(event)) {
+      handleDeleteChar(event, change)
+      return true
+    }
+
+    if (Hotkeys.isDeleteCharForward(event)) {
+      handleDeleteChar(event, change)
+      return true
+    }
+    return false
+  }
+
+
   function handleKeyDownNonCompliant(event, change) {
     if (Hotkeys.isDeleteCharBackward(event)) {
-      const isRemoveText = handleDeleteChar(event, change, 'deleteCharBackward')
+      const isRemoveText = handleDeleteChar(event, change)
 
       if (isRemoveText) {
         syntheticInput = {
@@ -124,7 +184,7 @@ function AfterPlugin() {
     }
 
     if (Hotkeys.isDeleteCharForward(event)) {
-      const isRemoveText = handleDeleteChar(event, change, 'deleteCharForward')
+      const isRemoveText = handleDeleteChar(event, change)
 
       if (isRemoveText) {
         syntheticInput = {
@@ -138,7 +198,7 @@ function AfterPlugin() {
 
   function onBeforeInput(event, change, editor) {
     if (INPUT_EVENTS_LEVEL_2) {
-      handleBeforeInputLevel2(event, editor)
+      handleBeforeInputLevel2(event, change, editor)
     } else if (INPUT_EVENTS_LEVEL_1) {
       handleBeforeInputLevel1(event, change)
     } else {
@@ -192,8 +252,16 @@ function AfterPlugin() {
   }
 
   function onCompositionUpdate(event, change, editor) {
-    console.log('onCompUpdate', event, event.nativeEvent, event.data)
-    cachedCompositionData = event.data
+    if (INPUT_EVENTS_LEVEL_2) {
+      // noop
+    } else if (INPUT_EVENTS_LEVEL_1) {
+      handleCompositionUpdateLevel1(event, change)
+    } else {
+      // TODO
+    }
+
+    // console.log('onCompUpdate', event, event.nativeEvent, event.data)
+    // cachedCompositionData = event.data
   }
 
   /**
@@ -418,7 +486,10 @@ function AfterPlugin() {
   function onInput(event, change, editor) {
     // handle insertText in onInput to all DOM native handling to occur
     // if triggered from onBeforeInput, vDOM merges the 2 and duplicates output
-    if (INPUT_EVENTS_LEVEL_1) {
+    if (INPUT_EVENTS_LEVEL_2) {
+      // noop level 2 of the spec operates entirely in beforeinput
+    } else if (INPUT_EVENTS_LEVEL_1) {
+      console.log('input!')
       handleInputLevel1(event, change)
     } else {
       handleInputNonCompliant(event, change)
